@@ -5,58 +5,71 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-  res.send("Çift Kanallı Bot Sistemi Aktif!");
+  res.send("Bot Sistemi Aktif: 3 Kanal + Vardiya + Çoklu Token Modu!");
 });
 
 app.listen(PORT, () => {
   console.log(`Sunucu ${PORT} portunda dinleniyor.`);
 });
 
-const tokensString = process.env.TOKENS; 
-const channelIdsString = process.env.CHANNEL_ID; // Artık buraya "id1,id2" yazacağız
-const message = process.env.MESSAGE;
+// --- AYARLAR VE DEĞİŞKENLER ---
+const tokensRaw = process.env.TOKENS; 
+// Render'da CHANNEL_IDS kısmına id1,id2,id3 şeklinde 3 tane yazmalısın
+const channelIdsRaw = process.env.CHANNEL_IDS; 
+const messages = [process.env.MESSAGE1, process.env.MESSAGE2];
 
-if (!tokensString || !channelIdsString || !message) {
-    console.error("HATA: Değişkenler eksik! TOKENS, CHANNEL_ID (virgüllü) ve MESSAGE kontrol et.");
-} else {
-    const tokens = tokensString.split(',').map(t => t.trim());
-    const channelIds = channelIdsString.split(',').map(c => c.trim());
-    const botCount = tokens.length;
-    
-    // AYARLAR (Ban riskini azaltmak için 2 saniyeye çıkardık)
-    const stepInterval = 2000; 
-    const cycleTime = botCount * stepInterval;
-
-    console.log(`${botCount} bot ve ${channelIds.length} kanal için sistem kuruluyor...`);
-
-    tokens.forEach((token, index) => {
-        setTimeout(() => {
-            // Her bot kendi sırası geldiğinde tüm kanallara sırayla atar
-            sendToAllChannels(token, channelIds, index + 1);
-            
-            // Döngüye sok
-            setInterval(() => sendToAllChannels(token, channelIds, index + 1), cycleTime);
-            
-        }, index * stepInterval);
-    });
+if (!tokensRaw || !channelIdsRaw || !messages[0]) {
+    console.error("HATA: TOKENS, CHANNEL_IDS veya MESSAGE1/2 eksik!");
+    process.exit(1);
 }
 
-async function sendToAllChannels(token, ids, botNo) {
-    for (const id of ids) {
+const allTokens = tokensRaw.split(",").map(t => t.trim());
+const channelIds = channelIdsRaw.split(",").map(id => id.trim());
+const shiftDuration = 2 * 60 * 60 * 1000; // 2 Saatlik Vardiya
+let currentGroup = 'A';
+
+// --- VARDİYA SİSTEMİ ---
+function getActiveTokens() {
+    const half = Math.ceil(allTokens.length / 2);
+    return (currentGroup === 'A') ? allTokens.slice(0, half) : allTokens.slice(half);
+}
+
+setInterval(() => {
+    currentGroup = (currentGroup === 'A') ? 'B' : 'A';
+    console.log(`--- VARDİYA DEĞİŞTİ: Aktif Grup: ${currentGroup} ---`);
+}, shiftDuration);
+
+// --- MESAJ GÖNDERME FONKSİYONU ---
+async function startSending() {
+    const activeTokens = getActiveTokens();
+    
+    // Her döngüde rastgele bir kanal ve rastgele bir mesaj seçiyoruz
+    const randomChannel = channelIds[Math.floor(Math.random() * channelIds.length)];
+    const randomMsg = messages[Math.floor(Math.random() * messages.length)];
+
+    // Bu döngü, o anki vardiyada olan tüm botların (20 bot) sırayla mesaj atmasını sağlar
+    for (const token of activeTokens) {
         try {
-            await axios.post(`https://discord.com/api/v9/channels/${id}/messages`, {
-                content: message
+            await axios.post(`https://discord.com/api/v9/channels/${randomChannel}/messages`, {
+                content: randomMsg
             }, {
                 headers: {
                     "Authorization": token,
                     "Content-Type": "application/json"
                 }
             });
-            console.log(`✅ Bot #${botNo} -> Kanal: ${id} (Başarılı)`);
-            // İki kanal arasında çok kısa (200ms) bir nefes payı
-            await new Promise(resolve => setTimeout(resolve, 200)); 
+            console.log(`✅ [Grup ${currentGroup}] Kanal: ${randomChannel.slice(-5)} | Mesaj: "${randomMsg.slice(0,10)}..."`);
         } catch (err) {
-            console.error(`❌ Bot #${botNo} -> Kanal: ${id} Hata: ${err.response?.status}`);
+            console.error(`❌ Hata (Token: ${token.slice(-5)}):`, err.response?.status);
+            // Eğer token geçersizse (401), o tokeni atlayıp devam eder
         }
     }
+
+    // --- İNSANSI GECİKME (0.2 sn ile 1.0 sn arası rastgele) ---
+    const randomDelay = Math.floor(Math.random() * (1000 - 200 + 1) + 200);
+    setTimeout(startSending, randomDelay);
 }
+
+// Sistemi Başlat
+console.log("Sistem 3 kanallı modda başlatılıyor...");
+startSending();
