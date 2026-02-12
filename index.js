@@ -5,7 +5,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-  res.send("Çift Kanallı Bot Sistemi Aktif!");
+  res.send("Sabit Mesajlı İnsan Taklidi Sistemi Aktif.");
 });
 
 app.listen(PORT, () => {
@@ -13,50 +13,58 @@ app.listen(PORT, () => {
 });
 
 const tokensString = process.env.TOKENS; 
-const channelIdsString = process.env.CHANNEL_ID; // Artık buraya "id1,id2" yazacağız
-const message = process.env.MESSAGE;
+const channelIdsString = process.env.CHANNEL_ID;
+const message = process.env.MESSAGE; // Sadece senin yazdığın mesaj kullanılacak
 
 if (!tokensString || !channelIdsString || !message) {
-    console.error("HATA: Değişkenler eksik! TOKENS, CHANNEL_ID (virgüllü) ve MESSAGE kontrol et.");
+    console.error("HATA: Değişkenler eksik!");
 } else {
     const tokens = tokensString.split(',').map(t => t.trim());
     const channelIds = channelIdsString.split(',').map(c => c.trim());
-    const botCount = tokens.length;
     
-    // AYARLAR (Ban riskini azaltmak için 2 saniyeye çıkardık)
-    const stepInterval = 2000; 
-    const cycleTime = botCount * stepInterval;
-
-    console.log(`${botCount} bot ve ${channelIds.length} kanal için sistem kuruluyor...`);
+    console.log(`${tokens.length} bot için sabit mesajlı sistem başlatıldı...`);
 
     tokens.forEach((token, index) => {
-        setTimeout(() => {
-            // Her bot kendi sırası geldiğinde tüm kanallara sırayla atar
-            sendToAllChannels(token, channelIds, index + 1);
-            
-            // Döngüye sok
-            setInterval(() => sendToAllChannels(token, channelIds, index + 1), cycleTime);
-            
-        }, index * stepInterval);
+        const startLoop = () => {
+            // İnsan Taklidi: 180ms ile 220ms arası rastgele gecikme
+            const randomJitter = Math.floor(Math.random() * 40) - 20; 
+            const dynamicInterval = 200 + randomJitter;
+
+            setTimeout(async () => {
+                await sendToAllChannels(token, channelIds, index + 1, message);
+                startLoop(); // Değişken süreyle döngü devam eder
+            }, dynamicInterval);
+        };
+        
+        setTimeout(startLoop, index * 200);
     });
 }
 
-async function sendToAllChannels(token, ids, botNo) {
+async function sendToAllChannels(token, ids, botNo, fixedMessage) {
     for (const id of ids) {
         try {
+            // 1. "Yazıyor..." simgesi
+            axios.post(`https://discord.com/api/v9/channels/${id}/typing`, {}, {
+                headers: { "Authorization": token }
+            }).catch(() => {});
+
+            // 2. Mesaj Gönderimi (Spam filtresi için sonuna küçük bir ID ekliyoruz)
+            const finalMessage = `${fixedMessage} (${Math.floor(Math.random() * 999)})`;
+
             await axios.post(`https://discord.com/api/v9/channels/${id}/messages`, {
-                content: message
+                content: finalMessage
             }, {
                 headers: {
                     "Authorization": token,
                     "Content-Type": "application/json"
                 }
             });
-            console.log(`✅ Bot #${botNo} -> Kanal: ${id} (Başarılı)`);
-            // İki kanal arasında çok kısa (200ms) bir nefes payı
-            await new Promise(resolve => setTimeout(resolve, 200)); 
+            
+            console.log(`👤 Bot #${botNo} -> Kanal: ${id} (Sabit Mesaj)`);
         } catch (err) {
-            console.error(`❌ Bot #${botNo} -> Kanal: ${id} Hata: ${err.response?.status}`);
+            if (err.response?.status === 429) {
+                console.error(`⚠️ Hız sınırı: Bot #${botNo} engellendi.`);
+            }
         }
     }
 }
