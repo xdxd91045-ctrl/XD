@@ -4,72 +4,68 @@ const axios = require("axios");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get("/", (req, res) => {
-  res.send("Bot Sistemi Aktif: 3 Kanal + Vardiya + Çoklu Token Modu!");
-});
+app.get("/", (req, res) => res.send("Özel Gecikmeli Spam Sistemi Aktif!"));
+app.listen(PORT, () => console.log(`Sunucu ${PORT} portunda çalışıyor.`));
 
-app.listen(PORT, () => {
-  console.log(`Sunucu ${PORT} portunda dinleniyor.`);
-});
-
-// --- AYARLAR VE DEĞİŞKENLER ---
+// --- AYARLAR ---
 const tokensRaw = process.env.TOKENS; 
-// Render'da CHANNEL_IDS kısmına id1,id2,id3 şeklinde 3 tane yazmalısın
 const channelIdsRaw = process.env.CHANNEL_IDS; 
 const messages = [process.env.MESSAGE1, process.env.MESSAGE2];
 
-if (!tokensRaw || !channelIdsRaw || !messages[0]) {
-    console.error("HATA: TOKENS, CHANNEL_IDS veya MESSAGE1/2 eksik!");
-    process.exit(1);
-}
+const allTokens = tokensRaw ? tokensRaw.split(",").map(t => t.trim()).filter(t => t) : [];
+const channelIds = channelIdsRaw ? channelIdsRaw.split(",").map(id => id.trim()).filter(id => id) : [];
 
-const allTokens = tokensRaw.split(",").map(t => t.trim());
-const channelIds = channelIdsRaw.split(",").map(id => id.trim());
-const shiftDuration = 2 * 60 * 60 * 1000; // 2 Saatlik Vardiya
 let currentGroup = 'A';
+const shiftDuration = 2 * 60 * 60 * 1000; // 2 Saatlik Vardiya
 
-// --- VARDİYA SİSTEMİ ---
+setInterval(() => {
+    currentGroup = (currentGroup === 'A') ? 'B' : 'A';
+    console.log(`--- VARDİYA DEĞİŞTİ: Aktif Grup ${currentGroup} ---`);
+}, shiftDuration);
+
 function getActiveTokens() {
     const half = Math.ceil(allTokens.length / 2);
     return (currentGroup === 'A') ? allTokens.slice(0, half) : allTokens.slice(half);
 }
 
-setInterval(() => {
-    currentGroup = (currentGroup === 'A') ? 'B' : 'A';
-    console.log(`--- VARDİYA DEĞİŞTİ: Aktif Grup: ${currentGroup} ---`);
-}, shiftDuration);
+// --- ANA DÖNGÜ (0.5sn, 1.0sn, 1.5sn Kurgusu) ---
+async function startSpam() {
+    while (true) {
+        const activeTokens = getActiveTokens();
+        
+        // Her döngüde botların sırasını (index) kullanarak gecikme veriyoruz
+        // index 0 -> 0.5sn, index 1 -> 1.0sn, index 2 -> 1.5sn...
+        const sendPromises = activeTokens.map((token, index) => {
+            const delay = (index + 1) * 500; // Her bot için +0.5 saniye ekler
+            
+            return new Promise((resolve) => {
+                setTimeout(async () => {
+                    const randomChannel = channelIds[Math.floor(Math.random() * channelIds.length)];
+                    const randomMsg = messages[Math.floor(Math.random() * messages.length)];
 
-// --- MESAJ GÖNDERME FONKSİYONU ---
-async function startSending() {
-    const activeTokens = getActiveTokens();
-    
-    // Her döngüde rastgele bir kanal ve rastgele bir mesaj seçiyoruz
-    const randomChannel = channelIds[Math.floor(Math.random() * channelIds.length)];
-    const randomMsg = messages[Math.floor(Math.random() * messages.length)];
-
-    // Bu döngü, o anki vardiyada olan tüm botların (20 bot) sırayla mesaj atmasını sağlar
-    for (const token of activeTokens) {
-        try {
-            await axios.post(`https://discord.com/api/v9/channels/${randomChannel}/messages`, {
-                content: randomMsg
-            }, {
-                headers: {
-                    "Authorization": token,
-                    "Content-Type": "application/json"
-                }
+                    try {
+                        await axios.post(`https://discord.com/api/v9/channels/${randomChannel}/messages`, 
+                        { content: randomMsg }, 
+                        { headers: { "Authorization": token, "Content-Type": "application/json" } });
+                        console.log(`🚀 Bot ${index + 1} (${delay}ms): Mesaj gönderildi.`);
+                    } catch (err) {
+                        console.error(`❌ Bot ${index + 1} Hata:`, err.response?.status);
+                    }
+                    resolve();
+                }, delay);
             });
-            console.log(`✅ [Grup ${currentGroup}] Kanal: ${randomChannel.slice(-5)} | Mesaj: "${randomMsg.slice(0,10)}..."`);
-        } catch (err) {
-            console.error(`❌ Hata (Token: ${token.slice(-5)}):`, err.response?.status);
-            // Eğer token geçersizse (401), o tokeni atlayıp devam eder
-        }
-    }
+        });
 
-    // --- İNSANSI GECİKME (0.2 sn ile 1.0 sn arası rastgele) ---
-    const randomDelay = Math.floor(Math.random() * (1000 - 200 + 1) + 200);
-    setTimeout(startSending, randomDelay);
+        // Mevcut gruptaki tüm botlar kendi sürelerinde mesaj atana kadar bekle
+        await Promise.all(sendPromises);
+        
+        // Grup bittikten sonra yeni bir dalga başlatmadan önce 1 saniye nefes al
+        await new Promise(r => setTimeout(r, 1000));
+    }
 }
 
-// Sistemi Başlat
-console.log("Sistem 3 kanallı modda başlatılıyor...");
-startSending();
+if (allTokens.length > 0 && channelIds.length > 0) {
+    startSpam();
+} else {
+    console.error("HATA: Token veya Kanal ID bulunamadı!");
+}
