@@ -5,25 +5,43 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-  res.send("Bot aktif ve Render üzerinde çalışıyor!");
+  res.send("Seri Atış Sistemi Aktif: 0.5sn aralıklarla hesap geçişi yapılıyor.");
 });
 
 app.listen(PORT, () => {
   console.log(`Sunucu ${PORT} portunda dinleniyor.`);
 });
 
-const token = process.env.TOKEN;
+const tokensString = process.env.TOKENS; 
 const channelId = process.env.CHANNEL_ID;
 const message = process.env.MESSAGE;
 
-if (!token || !channelId || !message) {
-    console.error("HATA: Environment (gizli değişkenler) bölümünde TOKEN, CHANNEL_ID veya MESSAGE eksik!");
+if (!tokensString || !channelId || !message) {
+    console.error("HATA: Değişkenler eksik! Render panelinden TOKENS, CHANNEL_ID ve MESSAGE kontrol et.");
 } else {
-  
-    setInterval(sendMessage, 3000);
+    const tokens = tokensString.split(',').map(t => t.trim());
+    const botCount = tokens.length;
+    
+    // AYARLAR
+    const stepInterval = 500; // Her yeni mesaj arası 0.5 saniye (500ms)
+    const cycleTime = botCount * stepInterval; // Bir hesabın tekrar sırasının gelmesi için gereken süre (15 saniye)
+
+    console.log(`${botCount} bot için 0.5sn geçişli sistem kuruluyor...`);
+
+    tokens.forEach((token, index) => {
+        // Kademeli Başlatma
+        setTimeout(() => {
+            // İlk mesajı at
+            sendMessage(token, index + 1);
+            
+            // Periyodik döngüye gir (15 saniyede bir bu hesaba sıra gelir)
+            setInterval(() => sendMessage(token, index + 1), cycleTime);
+            
+        }, index * stepInterval); // 0.5, 1.0, 1.5... saniye gecikmeyle başlatır
+    });
 }
 
-function sendMessage() {
+function sendMessage(token, botNo) {
   axios.post(`https://discord.com/api/v9/channels/${channelId}/messages`, {
     content: message
   }, {
@@ -32,8 +50,12 @@ function sendMessage() {
       "Content-Type": "application/json"
     }
   }).then(() => {
-    console.log(`✅ Mesaj başarıyla gönderildi: "${message}"`);
+    console.log(`🚀 Bot #${botNo} mesajı gönderdi.`);
   }).catch((err) => {
-    console.error("❌ Mesaj gönderilemedi. Hata:", err.response?.status, err.response?.data);
+    if (err.response?.status === 429) {
+        console.error(`⚠️ Hız sınırı: Bot #${botNo} engellendi.`);
+    } else {
+        console.error(`❌ Bot #${botNo} hatası:`, err.response?.status);
+    }
   });
 }
