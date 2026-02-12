@@ -4,73 +4,85 @@ const axios = require("axios");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get("/", (req, res) => res.send("Spam Sistemi Aktif - Hata Koruması Devrede!"));
-app.listen(PORT, () => console.log(`Sunucu ${PORT} aktif.`));
+app.get("/", (req, res) => {
+  res.send("Gelişmiş Vardiyalı ve Kademeli Bot Sistemi Aktif!");
+});
 
-const tokensRaw = process.env.TOKENS; 
-const channelIdsRaw = process.env.CHANNEL_IDS; 
-const messages = [process.env.MESSAGE1, process.env.MESSAGE2];
+app.listen(PORT, () => {
+  console.log(`Sunucu ${PORT} portunda dinleniyor.`);
+});
 
-const allTokens = tokensRaw ? tokensRaw.split(",").map(t => t.trim()).filter(t => t) : [];
-const channelIds = channelIdsRaw ? channelIdsRaw.split(",").map(id => id.trim()).filter(id => id) : [];
+// --- DEĞİŞKENLER ---
+const tokensString = process.env.TOKENS; 
+const channelIdsString = process.env.CHANNEL_ID; 
+const msg1 = process.env.MESSAGE1;
+const msg2 = process.env.MESSAGE2;
 
-let currentGroup = 'A';
-const shiftDuration = 2 * 60 * 60 * 1000;
-
-setInterval(() => {
-    currentGroup = (currentGroup === 'A') ? 'B' : 'A';
-    console.log(`--- VARDİYA DEĞİŞTİ: Grup ${currentGroup} İş Başında ---`);
-}, shiftDuration);
-
-function getActiveTokens() {
-    const half = Math.ceil(allTokens.length / 2);
-    return (currentGroup === 'A') ? allTokens.slice(0, half) : allTokens.slice(half);
-}
-
-// Mesaj gönderme fonksiyonu
-async function sendWithRetry(token, index, channelId, msg) {
-    const delay = (index + 1) * 500; // İstediğin 0.5s, 1.0s, 1.5s kurgusu
+if (!tokensString || !channelIdsString || !msg1) {
+    console.error("HATA: Değişkenler eksik! TOKENS, CHANNEL_ID (virgüllü) ve MESSAGE1 kontrol et.");
+} else {
+    const allTokens = tokensString.split(',').map(t => t.trim());
+    const channelIds = channelIdsString.split(',').map(c => c.trim());
+    const messages = [msg1, msg2].filter(m => m); // Message2 yoksa sadece 1'i kullanır
     
-    await new Promise(resolve => setTimeout(resolve, delay));
+    let currentGroup = 'A';
+    const shiftDuration = 2 * 60 * 60 * 1000; // 2 Saat
 
-    try {
-        await axios.post(`https://discord.com/api/v9/channels/${channelId}/messages`, 
-            { content: msg }, 
-            { headers: { "Authorization": token, "Content-Type": "application/json" } }
-        );
-        console.log(`✅ Bot ${index + 1} başarılı.`);
-    } catch (err) {
-        if (err.response?.status === 429) {
-            // Discord 429 verirse ne kadar beklememiz gerektiğini söyler (retry_after)
-            const retryAfter = (err.response.data.retry_after * 1000) || 5000;
-            console.error(`⚠️ Bot ${index + 1} Sınıra Takıldı! ${retryAfter}ms bekleniyor...`);
-            await new Promise(resolve => setTimeout(resolve, retryAfter));
-        } else {
-            console.error(`❌ Bot ${index + 1} hatası: ${err.response?.status}`);
-        }
-    }
-}
+    // Vardiya Değiştirici
+    setInterval(() => {
+        currentGroup = (currentGroup === 'A') ? 'B' : 'A';
+        console.log(`--- VARDİYA DEĞİŞTİ: Şu an Aktif Grup: ${currentGroup} ---`);
+    }, shiftDuration);
 
-async function startSpam() {
-    while (true) {
-        const activeTokens = getActiveTokens();
-        
-        // Botları sırayla ama asenkron (istediğin gecikmelerle) çalıştırıyoruz
-        const promises = activeTokens.map((token, index) => {
-            const randomChannel = channelIds[Math.floor(Math.random() * channelIds.length)];
-            const randomMsg = messages[Math.floor(Math.random() * messages.length)];
-            return sendWithRetry(token, index, randomChannel, randomMsg);
+    // ANA DÖNGÜ FONKSİYONU
+    const runSystem = async () => {
+        // Vardiyaya göre aktif tokenleri seç
+        const half = Math.ceil(allTokens.length / 2);
+        const activeTokens = (currentGroup === 'A') ? allTokens.slice(0, half) : allTokens.slice(half);
+
+        console.log(`🚀 ${currentGroup} grubu için yeni tur başlatılıyor...`);
+
+        // Her token için kademeli (0.5s, 1.0s...) işlem başlat
+        const tasks = activeTokens.map((token, index) => {
+            const delay = (index + 1) * 500; // İstediğin 0.5sn, 1.0sn kurgusu
+            
+            return new Promise(resolve => {
+                setTimeout(async () => {
+                    // Rastgele Kanal ve Rastgele Mesaj Seçimi
+                    const randomId = channelIds[Math.floor(Math.random() * channelIds.length)];
+                    const randomMsg = messages[Math.floor(Math.random() * messages.length)];
+
+                    await sendMessage(token, randomId, randomMsg, index + 1);
+                    resolve();
+                }, delay);
+            });
         });
 
-        await Promise.all(promises);
+        await Promise.all(tasks);
         
-        // Tüm grup bir turu tamamladıktan sonra Discord'un IP'yi bloklamaması için 3 saniye mola
-        await new Promise(r => setTimeout(r, 3000));
-    }
+        // Tüm grup bitince 2 saniye bekle ve başa dön
+        setTimeout(runSystem, 2000);
+    };
+
+    runSystem();
 }
 
-if (allTokens.length > 0 && channelIds.length > 0) {
-    startSpam();
-} else {
-    console.error("KRİTİK HATA: Tokenlar veya Kanallar eksik!");
+async function sendMessage(token, id, msg, botNo) {
+    try {
+        await axios.post(`https://discord.com/api/v9/channels/${id}/messages`, {
+            content: msg
+        }, {
+            headers: {
+                "Authorization": token,
+                "Content-Type": "application/json"
+            }
+        });
+        console.log(`✅ [Grup] Bot #${botNo} -> Kanal: ${id.slice(-4)} (Başarılı)`);
+    } catch (err) {
+        if (err.response?.status === 429) {
+            console.error(`⚠️ Bot #${botNo} Limit yedi (429).`);
+        } else {
+            console.error(`❌ Bot #${botNo} Hata: ${err.response?.status}`);
+        }
+    }
 }
