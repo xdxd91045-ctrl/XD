@@ -1,80 +1,40 @@
-const express = require('express');
-const axios = require("axios");
+// ... (üst kısımdaki express ve ws ayarları aynı kalacak)
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+const tokens = process.env.TOKENS ? process.env.TOKENS.split(',').map(t => t.trim()) : [];
+const delayBetweenAccounts = 1000; // Hesaplar arası 1 saniye fark
+const individualAccountInterval = tokens.length * delayBetweenAccounts; // Her hesabın kendi bekleme süresi
 
-app.get("/", (req, res) => {
-  res.send("Bot Sistemi Aktif! Hız Sınırı Pas Geçme Modu Devrede.");
-});
-
-app.listen(PORT, () => {
-  console.log(`Sunucu ${PORT} portunda dinleniyor.`);
-});
-
-// --- AYARLAR ---
-const tokensString = process.env.TOKENS; 
-const channelIdsString = process.env.CHANNEL_ID; 
-const msg1 = process.env.MESSAGE1;
-const msg2 = process.env.MESSAGE2;
-
-if (!tokensString || !channelIdsString || !msg1) {
-    console.error("HATA: Değişkenler eksik! Render Panelini kontrol et.");
+if (tokens.length === 0 || !channelId || !m1 || !m2 || !m3) {
+    console.error("HATA: Değişkenler eksik!");
 } else {
-    const allTokens = tokensString.split(',').map(t => t.trim()).filter(t => t);
-    const channelIds = channelIdsString.split(',').map(c => c.trim()).filter(c => c);
-    const messages = [msg1, msg2].filter(m => m);
-    
-    let currentGroup = 'A';
-    const shiftDuration = 2 * 60 * 60 * 1000; // 2 Saatlik Vardiya
+    console.log(`${tokens.length} hesap aktif. Her hesap ${individualAccountInterval / 1000} saniyede bir mesaj atacak.`);
 
-    setInterval(() => {
-        currentGroup = (currentGroup === 'A') ? 'B' : 'A';
-        console.log(`--- VARDİYA DEĞİŞTİ: Yeni Grup: ${currentGroup} ---`);
-    }, shiftDuration);
-
-    const startCycle = async () => {
-        const half = Math.ceil(allTokens.length / 2);
-        const activeTokens = (currentGroup === 'A') ? allTokens.slice(0, half) : allTokens.slice(half);
-
-        console.log(`🚀 ${currentGroup} grubu tura başlıyor...`);
-
-        for (let i = 0; i < activeTokens.length; i++) {
-            const token = activeTokens[i];
-            const randomChannel = channelIds[Math.floor(Math.random() * channelIds.length)];
-            const randomMsg = messages[Math.floor(Math.random() * messages.length)];
-
-            // İstediğin 0.5 saniyelik kademeli artış
-            await new Promise(resolve => setTimeout(resolve, 500)); 
-            
-            // Mesajı gönder (Yanıtı beklemiyoruz, hata gelse bile döngü devam eder)
-            sendToDiscord(token, randomChannel, randomMsg, i + 1);
-        }
-
-        // Tur bittikten sonra kısa bir nefes payı (IP bloklanmaması için)
-        setTimeout(startCycle, 5000);
-    };
-
-    startCycle();
+    tokens.forEach((token, index) => {
+        // Her hesap sırayla 1'er saniye arayla başlar
+        setTimeout(() => {
+            startBot(token, index + 1, individualAccountInterval);
+        }, index * delayBetweenAccounts);
+    });
 }
 
-async function sendToDiscord(token, id, msg, botNo) {
-    try {
-        await axios.post(`https://discord.com/api/v9/channels/${id}/messages`, {
-            content: msg
-        }, {
-            headers: {
-                "Authorization": token,
-                "Content-Type": "application/json"
-            }
-        });
-        console.log(`✅ Bot #${botNo} -> Başarılı`);
-    } catch (err) {
-        if (err.response?.status === 429) {
-            // BEKLEME YAPMIYORUZ: Sadece log basıyoruz, döngü zaten sonraki bota geçti bile
-            console.warn(`⚠️ Bot #${botNo} Limit yedi! Pas geçildi.`);
-        } else {
-            console.error(`❌ Bot #${botNo} Hata: ${err.response?.status}`);
+function startBot(token, botNumber, interval) {
+    const label = `Hesap-${botNumber}`;
+    connectToGateway(token, label);
+
+    const msgs = [m1, m2, m3];
+    let step = 0;
+
+    setInterval(async () => {
+        const currentMsg = msgs[step];
+        try {
+            await axios.post(`https://discord.com/api/v9/channels/${channelId}/messages`, 
+                { content: currentMsg }, 
+                { headers: { "Authorization": token, "Content-Type": "application/json" } }
+            );
+            console.log(`✅ [${label}] Mesaj gitti.`);
+            step = (step + 1) % msgs.length;
+        } catch (err) {
+            console.error(`❌ [${label}] Hata: ${err.response?.status}`);
         }
-    }
+    }, interval); // Dinamik bekleme süresi (40 token için 40 saniye)
 }
